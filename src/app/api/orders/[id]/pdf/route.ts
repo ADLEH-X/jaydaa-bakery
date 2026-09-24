@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { renderInvoiceHtml } from '@/components/invoice-pdf-template';
-import puppeteer from 'puppeteer-core';
-import chromium from '@sparticuz/chromium';
 import fs from 'fs';
 
 export const dynamic = 'force-dynamic';
@@ -45,73 +43,83 @@ export async function GET(
       return NextResponse.json({ error: 'Order not found' }, { status: 404 });
     }
 
-    const html = renderInvoiceHtml(order);
+    const format = request.nextUrl.searchParams.get('format');
 
-    let executablePath = getExecutablePath();
-    let isServerless = false;
+    // On Vercel serverless (where headless Linux Chrome requires missing system libs like libnss3.so)
+    // or when format=html is requested, return the pixel-perfect interactive printable invoice view.
+    // The browser natively handles high-DPI rendering and "Save as PDF" instantly.
+    if (process.env.VERCEL || format === 'html') {
+      const html = renderInvoiceHtml(order, true);
+      return new NextResponse(html, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+        },
+      });
+    }
 
-    if (!executablePath) {
-      // Fall back to sparticuz chromium for serverless/linux deployment
+    // On local machine with Chrome/Edge available, attempt Puppeteer PDF generation
+    const executablePath = getExecutablePath();
+    if (executablePath) {
       try {
-        executablePath = await chromium.executablePath();
-        isServerless = true;
-      } catch (err) {
-        console.error('Failed to get chromium executable path:', err);
-      }
-    }
-
-    if (!executablePath) {
-      return NextResponse.json(
-        { error: 'No browser executable found for PDF generation' },
-        { status: 500 }
-      );
-    }
-
-    const browser = await puppeteer.launch({
-      args: isServerless
-        ? chromium.args
-        : [
+        const puppeteer = (await import('puppeteer-core')).default;
+        const browser = await puppeteer.launch({
+          args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
             '--disable-dev-shm-usage',
             '--disable-gpu',
             '--font-render-hinting=none',
           ],
-      defaultViewport: isServerless ? chromium.defaultViewport : { width: 1200, height: 800 },
-      executablePath,
-      headless: true,
-    });
+          defaultViewport: { width: 1200, height: 800 },
+          executablePath,
+          headless: true,
+        });
 
-    const page = await browser.newPage();
-    await page.setContent(html, { waitUntil: 'networkidle0' });
+        const html = renderInvoiceHtml(order, false);
+        const page = await browser.newPage();
+        await page.setContent(html, { waitUntil: 'networkidle0' });
 
-    const pdfBuffer = await page.pdf({
-      format: 'A4',
-      printBackground: true,
-      margin: {
-        top: '14mm',
-        right: '12mm',
-        bottom: '14mm',
-        left: '12mm',
-      },
-    });
+        const pdfBuffer = await page.pdf({
+          format: 'A4',
+          printBackground: true,
+          margin: {
+            top: '12mm',
+            right: '12mm',
+            bottom: '12mm',
+            left: '12mm',
+          },
+        });
 
-    await browser.close();
+        await browser.close();
 
-    const responseBuffer = Buffer.from(pdfBuffer);
+        return new NextResponse(Buffer.from(pdfBuffer), {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/pdf',
+            'Content-Disposition': `inline; filename="invoice-${order.invoiceRef}.pdf"`,
+            'Cache-Control': 'no-cache',
+          },
+        });
+      } catch (puppeteerErr) {
+        console.warn('Puppeteer generation failed, falling back to direct printable invoice:', puppeteerErr);
+      }
+    }
 
-    return new NextResponse(responseBuffer, {
+    // Fallback: Return clean interactive printable HTML invoice
+    const html = renderInvoiceHtml(order, true);
+    return new NextResponse(html, {
       status: 200,
       headers: {
-        'Content-Type': 'application/pdf',
-        'Content-Disposition': `inline; filename="invoice-${order.invoiceRef}.pdf"`,
+        'Content-Type': 'text/html; charset=utf-8',
         'Cache-Control': 'no-cache',
       },
     });
   } catch (error) {
-    console.error('Error generating PDF invoice:', error);
+    console.error('Error serving invoice:', error);
     return NextResponse.json(
-      { error: 'Failed to generate PDF bill', details: String(error) },
+      { error: 'Failed to display invoice', details: String(error) },
       { status: 500 }
     );
   }
