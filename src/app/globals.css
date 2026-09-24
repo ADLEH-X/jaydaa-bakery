@@ -1,0 +1,38 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 36 43% 98%;
+  --foreground: 24 15% 15%;
+  --card: 0 0% 100%;
+  --card-foreground: 24 15% 15%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 24 15% 15%;
+  --primary: 24 31% 18%;
+  --primary-foreground: 36 78% 89%;
+  --secondary: 30 50% 52%;
+  --secondary-foreground: 0 0% 100%;
+  --muted: 24 10% 45%;
+  --muted-foreground: 24 10% 45%;
+  --accent: 30 46% 83%;
+  --accent-foreground: 24 31% 18%;
+  --destructive: 0 84.2% 60.2%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 25 35% 87%;
+  --input: 25 35% 87%;
+  --ring: 24 31% 18%;
+  --radius: 0.5rem;
+}
+
+body {
+  background-color: #fcfaf7;
+  color: #2b2420;
+  font-feature-settings: "rlig" 1, "calt" 1;
+}
+
+@media print {
+  body {
+    background-color: #ffffff !important;
+  }
+}

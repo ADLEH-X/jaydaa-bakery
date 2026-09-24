@@ -1,0 +1,120 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model RawMaterial {
+  id               String           @id @default(cuid())
+  name             String
+  category         String           // "INGREDIENT" | "PACKAGING" | "OVERHEAD"
+  purchaseQuantity Float            // e.g., 1000 for 1kg, 30 for eggs tray, 100 for stickers
+  purchaseUnit     String           // "g", "ml", "pcs", "pack"
+  purchaseCost     Float            // Cost paid at market
+  unitCost         Float            // Auto-calculated: purchaseCost / purchaseQuantity
+  updatedAt        DateTime         @updatedAt
+  createdAt        DateTime         @default(now())
+  
+  recipeIngredients RecipeIngredient[]
+}
+
+model Recipe {
+  id                 String             @id @default(cuid())
+  name               String             @unique // e.g., "Classic Vanilla Sponge Loaf"
+  skuPrefix          String             // e.g., "VS" for Vanilla Sponge
+  description        String?
+  yieldSlices        Int                @default(8) // Slices per batch/loaf
+  ovenMinutes        Int                @default(35)
+  shelfLifeDays      Int                @default(5)
+  overheadPercent    Float              @default(0.12) // 12% energy & sanitation buffer
+  outerBoxCost       Float              @default(0.80) // Cost of outer transport box per loaf
+  
+  // Direct packaging per slice
+  wrapCostPerSlice   Float              @default(0.08) // Food-grade individual seal pouch
+  labelCostPerSlice  Float              @default(0.07) // Allergen & branding sticker
+  
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  ingredients        RecipeIngredient[]
+  orderItems         OrderItem[]
+}
+
+model RecipeIngredient {
+  id            String      @id @default(cuid())
+  recipeId      String
+  rawMaterialId String
+  quantityUsed  Float       // In raw material's purchaseUnit (e.g., 250 for 250g, 3 for 3 eggs)
+  
+  recipe        Recipe      @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  rawMaterial   RawMaterial @relation(fields: [rawMaterialId], references: [id])
+}
+
+model Cafe {
+  id                   String        @id @default(cuid())
+  name                 String        // e.g., "Roast & Bloom Specialty Coffee"
+  branch               String        // e.g., "Al Malqa Hub"
+  contactPerson        String        // e.g., "Faisal / Store Manager"
+  phone                String        // International format: e.g., "+966551234567"
+  clientCode           String        @unique // e.g., "RB-014"
+  defaultPaymentMethod String        @default("COD")
+  defaultPricePerSlice Float         @default(1.40)
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  orders               Order[]
+}
+
+model Order {
+  id             String        @id @default(cuid())
+  invoiceRef     String        @unique // e.g., "JB-2026-0042"
+  cafeId         String
+  status         String        @default("CONFIRMED")
+  paymentMethod  String        @default("COD")
+  paymentTerms   String        @default("COD / 3 Days Net")
+  orderDate      DateTime      @default(now())
+  deliveryDate   DateTime
+  dispatchTime   String        @default("07:30 AM Fresh Morning Drop")
+  
+  // Financial Rollups
+  totalLoaves    Int
+  totalSlices    Int
+  totalCost      Float         // Total internal cost to bake and package
+  totalRevenue   Float         // B2B wholesale amount billed to cafe
+  netProfit      Float         // totalRevenue - totalCost
+  profitMargin   Float         // (netProfit / totalRevenue) * 100
+  notes          String?
+
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  cafe           Cafe          @relation(fields: [cafeId], references: [id])
+  items          OrderItem[]
+}
+
+model OrderItem {
+  id               String   @id @default(cuid())
+  orderId          String
+  recipeId         String
+  loavesOrdered    Int      // Whole batch units only (e.g., 1, 2, 5)
+  yieldPerLoaf     Int      @default(8)
+  totalSlices      Int      // loavesOrdered * yieldPerLoaf
+  
+  // Unit Economics at time of order creation
+  unitCostPerSlice Float    // Snapshot of cost at order time
+  pricePerSlice    Float    // Wholesale price charged to cafe
+  lineCost         Float    // totalSlices * unitCostPerSlice
+  lineRevenue      Float    // totalSlices * pricePerSlice
+  lineProfit       Float    // lineRevenue - lineCost
+  
+  // Traceability & Compliance
+  batchCode        String   // e.g., "VS-260922"
+  productionDate   DateTime
+  bestBeforeDate   DateTime
+
+  order            Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  recipe           Recipe   @relation(fields: [recipeId], references: [id])
+}
